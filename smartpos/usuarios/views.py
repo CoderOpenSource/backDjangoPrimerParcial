@@ -10,12 +10,12 @@ from rest_framework_simplejwt.authentication import JWTAuthentication
 from datetime import date, timedelta
 from django.utils import timezone
 from datetime import datetime
-
+from django.db.models import Q
 from .models import Usuario, Bitacora
 from .serializers import UsuarioSerializer, LoginSerializer, GroupSerializer, PermissionSerializer
 from django.contrib.auth.models import Group
 from utils.email_utils import generar_codigo_verificacion, enviar_codigo_verificacion
-
+from .utils.bitacora_utils import registrar_bitacora
 # views.py (agrega esta vista debajo de RegistroClienteManualView)
 
 from rest_framework.views import APIView
@@ -44,6 +44,14 @@ class EliminarRegistroPendienteView(APIView):
                 return Response({'error': 'Este usuario ya está verificado, no se puede eliminar.'}, status=status.HTTP_400_BAD_REQUEST)
 
             user.delete()
+            registrar_bitacora(
+                request,
+                accion='Eliminó su cuenta pendiente de verificación',
+                modulo='Registro',
+                detalle=f"Eliminación manual de cuenta con email: {email}",
+                usuario=user
+            )
+
             return Response({'message': 'Registro eliminado correctamente'}, status=status.HTTP_200_OK)
 
         except Usuario.DoesNotExist:
@@ -75,6 +83,13 @@ class VerificarCodigoView(APIView):
             user.codigo_verificacion = None
             user.expiracion_codigo = None
             user.save()
+            registrar_bitacora(
+                request,
+                accion='Verificó su cuenta con código',
+                modulo='Verificación',
+                detalle=f"Verificación exitosa para el correo {user.email}",
+                usuario=user
+            )
 
             return Response({'message': 'Cuenta verificada exitosamente'}, status=status.HTTP_200_OK)
 
@@ -100,6 +115,13 @@ class ReenviarCodigoView(APIView):
             user.codigo_verificacion = nuevo_codigo
             user.expiracion_codigo = timezone.now() + timedelta(minutes=10)
             user.save()
+            registrar_bitacora(
+                request,
+                accion='Solicitó nuevo código de verificación',
+                modulo='Verificación',
+                detalle=f"Reenvío solicitado para el correo {user.email}",
+                usuario=user
+            )
 
             enviado = enviar_codigo_verificacion(user.email, nuevo_codigo)
             if not enviado:
@@ -112,9 +134,60 @@ class ReenviarCodigoView(APIView):
 
 
 class UsuarioViewSet(viewsets.ModelViewSet):
-    queryset = Usuario.objects.all()
     serializer_class = UsuarioSerializer
     permission_classes = [permissions.AllowAny]
+
+    def get_queryset(self):
+        queryset = Usuario.objects.all()
+        rol = self.request.query_params.get('rol')
+        busqueda = self.request.query_params.get('busqueda')
+
+        if rol:
+            queryset = queryset.filter(groups__name=rol)
+
+        if busqueda:
+            queryset = queryset.filter(
+                Q(first_name__icontains=busqueda) |
+                Q(last_name__icontains=busqueda) |
+                Q(ci__icontains=busqueda)
+            )
+
+        return queryset
+
+    def perform_create(self, serializer):
+        usuario = serializer.save()
+        # Si tienes autenticación, puedes usar self.request.user
+        registrar_bitacora(
+            self.request,
+            accion=f"Creó al usuario {usuario.username}",
+            modulo='Usuarios',
+            objeto_afectado='Usuario',
+            referencia_id=str(usuario.id),
+            detalle=f"Usuario creado: {usuario.email}"
+        )
+
+    def perform_update(self, serializer):
+        usuario = serializer.save()
+        registrar_bitacora(
+            self.request,
+            accion=f"Actualizó al usuario {usuario.username}",
+            modulo='Usuarios',
+            objeto_afectado='Usuario',
+            referencia_id=str(usuario.id),
+            detalle=f"Actualización del usuario: {usuario.email}"
+        )
+
+    def perform_destroy(self, instance):
+        registrar_bitacora(
+            self.request,
+            accion=f"Eliminó al usuario {instance.username}",
+            modulo='Usuarios',
+            objeto_afectado='Usuario',
+            referencia_id=str(instance.id),
+            detalle=f"Usuario eliminado: {instance.email}"
+        )
+        instance.delete()
+
 
 class RegistroClienteManualView(APIView):
     permission_classes = [permissions.AllowAny]
@@ -161,7 +234,15 @@ class RegistroClienteManualView(APIView):
             enviado = enviar_codigo_verificacion(user.email, codigo)
             if not enviado:
                 return Response({'error': 'Error al enviar el correo de verificación'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
+            registrar_bitacora(
+                request,
+                accion='Registro manual del cliente',
+                modulo='Registro',
+                objeto_afectado='Usuario',
+                referencia_id=str(user.id),
+                detalle=f"Registro desde frontend con correo {user.email}",
+                usuario=user
+            )
             return Response({
                 'message': 'Usuario registrado. Revisa tu correo para verificar tu cuenta.',
                 'email': user.email
@@ -190,7 +271,6 @@ class LoginView(APIView):
             return Response({'error': 'Contraseña incorrecta'}, status=status.HTTP_401_UNAUTHORIZED)
 
         # Bitácora
-        Bitacora.objects.create(usuario=user, accion='Inicio de sesión', fecha=datetime.now())
 
         refresh = RefreshToken.for_user(user)
 
@@ -206,6 +286,16 @@ class LoginView(APIView):
             'foto_perfil': foto_url,
             'role': role
         }
+        registrar_bitacora(
+            request,
+            accion='Inicio de sesión',
+            modulo='Autenticación',
+            detalle='Inicio de sesión exitoso',
+            objeto_afectado='Usuario',
+            referencia_id=str(user.id),
+            dispositivo='web',
+            usuario_override=user  # ✅ este es el parámetro correcto
+        )
 
         return Response({
             'refresh': str(refresh),
@@ -218,7 +308,12 @@ class LoginView(APIView):
 @permission_classes([permissions.IsAuthenticated])
 def logout_view(request):
     user = request.user
-    Bitacora.objects.create(usuario=user, accion='Cierre de sesión', fecha=datetime.now())
+    registrar_bitacora(
+        request,
+        accion='Cierre de sesión',
+        modulo='Autenticación',
+        detalle='Logout desde frontend'
+    )
     return Response({'message': 'Logout exitoso'})
 
 class GroupViewSet(viewsets.ModelViewSet):
@@ -229,7 +324,64 @@ class GroupViewSet(viewsets.ModelViewSet):
     def destroy(self, request, *args, **kwargs):
         return Response({"detail": "No se permite eliminar roles."}, status=405)
 
+    def perform_create(self, serializer):
+        grupo = serializer.save()
+        registrar_bitacora(
+            self.request,
+            accion=f"Creó el rol '{grupo.name}'",
+            modulo='Roles',
+            objeto_afectado='Group',
+            referencia_id=str(grupo.id)
+        )
+
+    def perform_update(self, serializer):
+        grupo = serializer.save()
+        registrar_bitacora(
+            self.request,
+            accion=f"Actualizó el rol '{grupo.name}'",
+            modulo='Roles',
+            objeto_afectado='Group',
+            referencia_id=str(grupo.id)
+        )
+
+    def destroy(self, request, *args, **kwargs):
+        return Response({"detail": "No se permite eliminar roles."}, status=405)
+
 class PermissionViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = Permission.objects.all()
     serializer_class = PermissionSerializer
     permission_classes = [permissions.IsAuthenticated]
+
+class ActualizarFCMTokenView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        token = request.data.get("fcm_token")
+        if not token:
+            return Response({'error': 'Token FCM requerido'}, status=400)
+
+        user = request.user
+        user.fcm_token = token
+        user.save()
+        registrar_bitacora(
+            request,
+            accion='Actualizó su token FCM',
+            modulo='Notificaciones',
+            detalle='Token FCM actualizado desde la app móvil o web'
+        )
+
+        return Response({'message': 'Token FCM actualizado correctamente'})
+# views.py
+
+from rest_framework import viewsets, permissions, filters
+from .models import Bitacora
+from .serializers import BitacoraSerializer
+
+class BitacoraViewSet(viewsets.ReadOnlyModelViewSet):
+    queryset = Bitacora.objects.select_related('usuario').all()
+    serializer_class = BitacoraSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
+    search_fields = ['usuario__username', 'accion', 'detalles']
+    ordering_fields = ['fecha']
+    ordering = ['-fecha']

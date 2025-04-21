@@ -18,6 +18,9 @@ class Usuario(AbstractUser):
     codigo_verificacion = models.CharField(max_length=6, blank=True, null=True)
     expiracion_codigo = models.DateTimeField(blank=True, null=True)
 
+    # 🔥 Token FCM para notificaciones push
+    fcm_token = models.TextField(blank=True, null=True)
+
     def __str__(self):
         return f"{self.username} ({self.get_full_name()})"
 
@@ -37,6 +40,12 @@ class Bitacora(models.Model):
         related_name='bitacoras'
     )
     accion = models.CharField(max_length=255)
+    modulo = models.CharField(max_length=100, blank=True, null=True)  # nuevo
+    detalle = models.TextField(blank=True, null=True)  # nuevo
+    objeto_afectado = models.CharField(max_length=255, blank=True, null=True)  # nuevo
+    referencia_id = models.CharField(max_length=50, blank=True, null=True)  # nuevo
+    ip_origen = models.GenericIPAddressField(blank=True, null=True)  # opcional
+    dispositivo = models.CharField(max_length=50, blank=True, null=True)  # "web", "móvil", etc.
     fecha = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
@@ -46,3 +55,4 @@ class Bitacora(models.Model):
         verbose_name = 'Bitácora'
         verbose_name_plural = 'Bitácoras'
         ordering = ['-fecha']
+

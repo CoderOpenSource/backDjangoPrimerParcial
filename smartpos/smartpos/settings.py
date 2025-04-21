@@ -31,6 +31,8 @@ ALLOWED_HOSTS = ['*']
 
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:4200",
+    "http://localhost:50956",
+"http://localhost:57173",
 ]
 
 
@@ -50,6 +52,9 @@ INSTALLED_APPS = [
     'usuarios',
     'productos',
     'ventas',
+    'notificaciones',
+    'reportes',
+    'recomendaciones'
 ]
 
 MIDDLEWARE = [
@@ -83,7 +88,7 @@ cloudinary.config(
 TEMPLATES = [
     {
         'BACKEND': 'django.template.backends.django.DjangoTemplates',
-        'DIRS': [],
+        'DIRS': [BASE_DIR / 'ventas' / 'templates'],
         'APP_DIRS': True,
         'OPTIONS': {
             'context_processors': [
@@ -95,6 +100,8 @@ TEMPLATES = [
         },
     },
 ]
+
+
 
 WSGI_APPLICATION = 'smartpos.wsgi.application'
 

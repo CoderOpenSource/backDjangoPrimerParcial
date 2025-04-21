@@ -85,3 +85,17 @@ class GroupSerializer(serializers.ModelSerializer):
     class Meta:
         model = Group
         fields = ['id', 'name', 'permissions', 'permission_details']
+
+from rest_framework import serializers
+from .models import Bitacora
+
+class BitacoraSerializer(serializers.ModelSerializer):
+    usuario_nombre = serializers.CharField(source='usuario.get_full_name', read_only=True)
+    username = serializers.CharField(source='usuario.username', read_only=True)
+
+    class Meta:
+        model = Bitacora
+        fields = [
+            'id', 'usuario', 'username', 'usuario_nombre', 'accion', 'fecha',
+            'modulo', 'detalle', 'referencia_id', 'objeto_afectado', 'ip_origen', 'dispositivo'
+        ]
